@@ -373,9 +373,40 @@ def agentic_run(model_target: str, user_prompt: str, q_speech: bool = False, tem
 
     print(message["content"])
 
+def load_tasks_from_file(file_path):
+    with open(file_path, "r", encoding="utf-8") as file:
+        return file.read()
+
 
 def main():
-    user_prompt = """
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--Model", type=str, default=DEFAULT_MODEL, help="Model name")
+    parser.add_argument("--URL", type=str, default=OLLAMA_BASE_URL, help="Ollama base URL")
+    parser.add_argument("--Speech", action="store_true", help="Enable speech output")
+    parser.add_argument("--Temperature", type=float, default=0.0, help="Temperature between 0.0 and 1.0")
+    parser.add_argument("--AllowSubmit", action="store_true", help="Allow sbatch submission")
+    parser.add_argument("--FilePrompt", type=str, default=None, help="Path to the file containing tasks")
+    args = parser.parse_args()
+
+    global OLLAMA_BASE_URL
+    global ALLOW_SUBMIT
+    OLLAMA_BASE_URL = args.URL
+    ALLOW_SUBMIT = args.AllowSubmit
+
+    if not check_slurm_json_support():
+        return
+
+    if not validate_ollama_and_model(args.Model):
+        return
+
+    if args.FilePrompt:
+        if os.path.isfile(args.FilePrompt) and os.path.getsize(args.FilePrompt) > 0:
+            user_prompt = load_tasks_from_file(args.FilePrompt)
+        else:
+            print("Error: The file does not exist or is empty. Please provide a valid file path.")
+            return
+    else:
+        user_prompt = """
 Analyze my HPC cluster and propose a scheduling plan.
 
 Tasks:
@@ -391,25 +422,6 @@ Tasks:
 5. Give a final recommendation.
 """
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--Model", type=str, default=DEFAULT_MODEL, help="Model name")
-    parser.add_argument("--URL", type=str, default=OLLAMA_BASE_URL, help="Ollama base URL")
-    parser.add_argument("--Speech", action="store_true", help="Enable speech output")
-    parser.add_argument("--Temperature", type=float, default=0.0, help="Temperature between 0.0 and 1.0")
-    parser.add_argument("--AllowSubmit", action="store_true", help="Allow sbatch submission")
-    args = parser.parse_args()
-
-    global OLLAMA_BASE_URL
-    global ALLOW_SUBMIT
-    OLLAMA_BASE_URL = args.URL
-    ALLOW_SUBMIT = args.AllowSubmit
-
-    if not check_slurm_json_support():
-        return
-
-    if not validate_ollama_and_model(args.Model):
-        return
-
     agentic_run(
         model_target=args.Model,
         user_prompt=user_prompt,
@@ -420,3 +432,4 @@ Tasks:
 
 if __name__ == "__main__":
     main()
+    
