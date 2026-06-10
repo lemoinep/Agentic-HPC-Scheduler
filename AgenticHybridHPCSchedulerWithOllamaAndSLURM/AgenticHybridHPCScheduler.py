@@ -24,6 +24,8 @@ from typing import List, Optional
 import requests
 from ollama import chat
 
+import time
+
 OLLAMA_BASE_URL = "http://localhost:11434"
 DEFAULT_MODEL = "llama3.1"
 DEFAULT_PARTITION = "gpu"
@@ -31,6 +33,8 @@ APP_DIR = Path.home() / ".agentic_hpc_scheduler"
 APP_DIR.mkdir(parents=True, exist_ok=True)
 
 ALLOW_SUBMIT = False
+_LAST_SQUEUE_CALL = 0.0
+_SQUEUE_CACHE: Optional[str] = None
 
 logging.basicConfig(
     level=logging.INFO,
@@ -115,9 +119,18 @@ def validate_ollama_and_model(model_name: str) -> bool:
 
 
 def get_slurm_queue() -> str:
+    global _LAST_SQUEUE_CALL, _SQUEUE_CACHE
+    now = time.time()
+    if _SQUEUE_CACHE is not None and now - _LAST_SQUEUE_CALL < 10:
+        return _SQUEUE_CACHE
+
     result = run_command(["squeue", "--json"], timeout=10)
+    _LAST_SQUEUE_CALL = now
+
     if result["returncode"] != 0:
-        return json.dumps({"error": result["stderr"]}, indent=2)
+        payload = json.dumps({"error": result["stderr"]}, indent=2)
+        _SQUEUE_CACHE = payload
+        return payload
 
     try:
         data = json.loads(result["stdout"])
@@ -125,7 +138,7 @@ def get_slurm_queue() -> str:
         running = [j for j in jobs if j.get("job_state") == "R"]
         pending = [j for j in jobs if j.get("job_state") == "PD"]
 
-        return json.dumps(
+        payload = json.dumps(
             {
                 "running_jobs": len(running),
                 "pending_jobs": len(pending),
@@ -133,8 +146,12 @@ def get_slurm_queue() -> str:
             },
             indent=2,
         )
+        _SQUEUE_CACHE = payload
+        return payload
     except Exception as exc:
-        return json.dumps({"error": f"Failed to parse squeue JSON: {exc}"}, indent=2)
+        payload = json.dumps({"error": f"Failed to parse squeue JSON: {exc}"}, indent=2)
+        _SQUEUE_CACHE = payload
+        return payload
 
 
 def inspect_topology() -> str:
@@ -322,6 +339,7 @@ def execute_tool(name: str, args: dict) -> str:
 
 
 def agentic_run(model_target: str, user_prompt: str, q_speech: bool = False, temperature: float = 0.0) -> None:
+    # add speech ... if it possible for exascale 
     tools = build_tools()
     messages = [
         {
@@ -334,12 +352,16 @@ def agentic_run(model_target: str, user_prompt: str, q_speech: bool = False, tem
         {"role": "user", "content": user_prompt},
     ]
 
-    response = chat(
-        model=model_target,
-        messages=messages,
-        tools=tools,
-        options={"temperature": temperature},
-    )
+    try:
+        response = chat(
+            model=model_target,
+            messages=messages,
+            tools=tools,
+            options={"temperature": temperature},
+        )
+    except Exception as exc:
+        logger.error("Initial Ollama chat failed: %s", exc)
+        return
 
     message = response["message"]
     tool_calls = message.get("tool_calls", [])
@@ -362,16 +384,22 @@ def agentic_run(model_target: str, user_prompt: str, q_speech: bool = False, tem
                 }
             )
 
-        response = chat(
-            model=model_target,
-            messages=messages,
-            tools=tools,
-            options={"temperature": temperature},
-        )
+        try:
+            response = chat(
+                model=model_target,
+                messages=messages,
+                tools=tools,
+                options={"temperature": temperature},
+            )
+        except Exception as exc:
+            logger.error("Ollama chat failed during tool loop: %s", exc)
+            return
+
         message = response["message"]
         tool_calls = message.get("tool_calls", [])
 
     print(message["content"])
+
 
 def load_tasks_from_file(file_path):
     with open(file_path, "r", encoding="utf-8") as file:
