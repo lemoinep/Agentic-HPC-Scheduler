@@ -100,13 +100,3 @@ Name of the local Ollama model to use (default: llama3.1).
 
 
 
-
-
-
-
-
-
-
-
-
-"# Agentic-HPC-Scheduler" 
