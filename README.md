@@ -79,7 +79,13 @@ Name of the local Ollama model to use (default: llama3.1).
 - `--AllowSubmit` – If set, allow the agent to actually submit jobs with sbatch; otherwise, submit_slurm_job returns an error and does not touch SLURM.
 - `--FilePrompt` – Path to a text/Markdown file containing the user tasks and instructions for the agent; if omitted, a built‑in default prompt about queue analysis and job optimization is used.
 
+
 ---
+
+
+## For more information
+
+<img src="Images/P0003.jpg" width="100%" />
 
 ## 📝 **Author**
 
